@@ -44,13 +44,22 @@ public class JitsiTokenService {
     }
 
     public String createToken(String roomName, Long userId, String name, String email, boolean moderator) {
+        return createToken(roomName, String.valueOf(userId), name, email, moderator);
+    }
+
+    /** Participant sans compte (lien d'invitation) : jamais modérateur. */
+    public String createGuestToken(String roomName, String guestId, String name, String email) {
+        return createToken(roomName, guestId, name, email, false);
+    }
+
+    private String createToken(String roomName, String userId, String name, String email, boolean moderator) {
         if (appId.isBlank() || keyId.isBlank() || privateKeyPem.isBlank()) {
             throw new IllegalStateException("JaaS JWT non configuré: app-id, key-id et private-key sont requis");
         }
 
         Instant now = Instant.now();
         Map<String, Object> user = new java.util.HashMap<>();
-        user.put("id", String.valueOf(userId));
+        user.put("id", userId);
         user.put("name", name);
         user.put("email", email);
         user.put("moderator", String.valueOf(moderator));

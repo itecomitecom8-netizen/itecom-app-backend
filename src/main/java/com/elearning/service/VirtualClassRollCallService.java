@@ -64,12 +64,18 @@ public class VirtualClassRollCallService {
     /** Enregistre « Je suis présent » ; refusé après la fin de l'appel. */
     @Transactional
     public void answer(VirtualClassRollCall call, User user) {
+        answer(call, user.getEmail(), (user.getFirstName() + " " + user.getLastName()).trim());
+    }
+
+    /** Réponse d'un participant identifié par son adresse (invité sans compte compris). */
+    @Transactional
+    public void answer(VirtualClassRollCall call, String email, String fullName) {
         if (!call.getExpiresAt().isAfter(LocalDateTime.now())) {
             throw new IllegalArgumentException("L'appel est terminé : votre réponse est arrivée trop tard.");
         }
-        if (answerRepository.existsByRollCallAndEmailIgnoreCase(call, user.getEmail())) return;
-        answerRepository.save(VirtualClassRollCallAnswer.builder().rollCall(call).email(user.getEmail().toLowerCase())
-            .fullName((user.getFirstName() + " " + user.getLastName()).trim()).answeredAt(LocalDateTime.now()).build());
+        if (answerRepository.existsByRollCallAndEmailIgnoreCase(call, email)) return;
+        answerRepository.save(VirtualClassRollCallAnswer.builder().rollCall(call).email(email.toLowerCase())
+            .fullName(fullName).answeredAt(LocalDateTime.now()).build());
     }
 
     /** Étudiants attendus : présents (ont répondu), connectés sans réponse, non connectés. */

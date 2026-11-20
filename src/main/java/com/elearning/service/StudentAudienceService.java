@@ -70,6 +70,9 @@ public class StudentAudienceService {
         java.util.LinkedHashMap<String, String> audience = new java.util.LinkedHashMap<>();
         vc.getStudents().forEach(s -> audience.putIfAbsent(s.getStudentEmail().toLowerCase(), s.getStudentName()));
         studentsOfLevels(vc.getTargetLevels()).forEach(u -> audience.putIfAbsent(u.getEmail().toLowerCase(), fullName(u)));
+        // Invités sans compte (invitation personnelle par email)
+        vc.getInvites().stream().filter(i -> !i.isShared() && i.isActive() && i.getEmail() != null)
+            .forEach(i -> audience.putIfAbsent(i.getEmail().toLowerCase(), i.getName()));
         return audience;
     }
 

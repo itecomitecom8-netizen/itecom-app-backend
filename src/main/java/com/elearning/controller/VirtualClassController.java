@@ -39,6 +39,7 @@ public class VirtualClassController {
     private final JitsiTokenService jitsiTokenService;
     private final com.elearning.service.StudentAudienceService audienceService;
     private final com.elearning.service.RecordingStorageService recordingStorage;
+    private final com.elearning.service.VirtualClassInviteService inviteService;
 
     /** Nombre d'étudiants conviés : liste et niveaux ciblés réunis, sans doublon. */
     private VirtualClassResponse toResponse(VirtualClass vc) {
@@ -47,6 +48,8 @@ public class VirtualClassController {
         r.setHasRecording(recordingStorage.hasRecording(vc));
         r.setRecordingUrl(recordingStorage.playbackUrl(vc));
         r.setRecordingLightUrl(recordingStorage.lightUrl(vc));
+        r.setGuestCount((int) vc.getInvites().stream().filter(i -> !i.isShared()).count());
+        r.setSharedLinkActive(vc.getInvites().stream().anyMatch(i -> i.isShared() && i.isActive()));
         return r;
     }
 
@@ -122,22 +125,30 @@ public class VirtualClassController {
     public ResponseEntity<VirtualClassResponse> create(
             @RequestPart("class") VirtualClass data,
             @RequestPart(value = "studentList", required = false) MultipartFile studentListFile,
+            @RequestParam(value = "shareLink", defaultValue = "false") boolean shareLink,
             @AuthenticationPrincipal UserDetails userDetails) {
-        // Étudiants de la liste (comptes existants) et/ou niveaux entiers
+        // Liste : les personnes qui ont un compte étudiant y sont inscrites, les autres reçoivent une invitation
+        // personnelle par email (sans compte). S'y ajoutent les niveaux entiers et, au choix, un lien partagé.
         final List<StudentListParserService.StudentInfo> studentInfos;
         try {
             studentInfos = studentListFile == null || studentListFile.isEmpty()
                 ? List.of() : studentListParserService.parseFile(studentListFile);
-            audienceService.requireStudentAccounts(studentInfos.stream().map(StudentListParserService.StudentInfo::email).toList());
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
             return ResponseEntity.badRequest().build();
         }
+        List<User> accounts = new ArrayList<>();
+        List<com.elearning.service.VirtualClassInviteService.GuestInput> guests = new ArrayList<>();
+        for (var info : studentInfos) {
+            String email = info.email() == null ? "" : info.email().trim().toLowerCase();
+            userRepository.findByEmail(email).filter(u -> u.getRole() == Role.ROLE_STUDENT).ifPresentOrElse(accounts::add,
+                () -> guests.add(new com.elearning.service.VirtualClassInviteService.GuestInput(info.name(), info.email())));
+        }
         data.setTargetLevels(com.elearning.service.StudentAudienceService.normalizeLevels(
             com.elearning.service.StudentAudienceService.levelList(data.getTargetLevels())));
-        if (studentInfos.isEmpty() && data.getTargetLevels() == null) {
-            throw new IllegalArgumentException("Choisissez au moins un niveau ou un étudiant.");
+        if (studentInfos.isEmpty() && data.getTargetLevels() == null && !shareLink) {
+            throw new IllegalArgumentException("Choisissez au moins un niveau, un étudiant ou un lien d'invitation.");
         }
         User teacher = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
         data.setTeacher(teacher);
@@ -155,14 +166,16 @@ public class VirtualClassController {
         } else {
             data.getStudents().clear();
         }
-        studentInfos.stream().map(info -> userRepository.findByEmail(info.email().trim().toLowerCase()).orElseThrow())
-            .distinct()
+        accounts.stream().distinct()
             .forEach(account -> data.getStudents().add(VirtualClassStudent.builder()
                 .virtualClass(data)
                 .studentName(com.elearning.service.StudentAudienceService.fullName(account))
                 .studentEmail(account.getEmail())
                 .build()));
+        if (data.getInvites() == null) data.setInvites(new ArrayList<>());
         VirtualClass saved = virtualClassRepository.save(data);
+        if (shareLink) inviteService.enableSharedLink(saved, false);
+        if (!guests.isEmpty()) inviteService.addGuests(saved, guests);
         return ResponseEntity.ok(toResponse(saved));
     }
 

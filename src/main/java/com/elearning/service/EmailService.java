@@ -156,6 +156,29 @@ public class EmailService {
         return trySendEmail(to, "🎓 Vos identifiants ITECOM", content);
     }
 
+    /** Invitation personnelle à une classe virtuelle, sans compte. Retourne la raison de l'échec, ou null si envoyé. */
+    public String sendVirtualClassInvite(String to, String guestName, String classTitle, String teacherName,
+                                         java.time.LocalDateTime scheduledAt, Integer durationMinutes, String link) {
+        String when = scheduledAt == null ? "" : scheduledAt.format(
+            java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM yyyy 'à' HH'h'mm", java.util.Locale.FRENCH))
+            + (durationMinutes != null ? " (" + durationMinutes + " min)" : "");
+        String content = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto'>" +
+            "<div style='background:linear-gradient(135deg,#0b2a6f,#1d6ff2);padding:30px;text-align:center'>" +
+            "<h1 style='color:white;margin:0;font-size:22px'>🎥 Invitation à une classe virtuelle</h1></div>" +
+            "<div style='padding:30px;background:#f9f9f9'>" +
+            "<p>Bonjour " + escape(guestName) + ",</p>" +
+            "<p>Vous êtes invité(e) à la séance en direct <strong>" + escape(classTitle) + "</strong>" +
+            (teacherName != null && !teacherName.isBlank() ? " animée par " + escape(teacherName) : "") + ".</p>" +
+            (when.isEmpty() ? "" : "<p style='font-size:15px'>📅 <strong>" + escape(when) + "</strong></p>") +
+            "<div style='text-align:center;margin:28px 0'>" +
+            "<a href='" + link + "' style='background:#1d6ff2;color:white;padding:14px 28px;text-decoration:none;border-radius:8px;font-size:15px'>Rejoindre la classe</a></div>" +
+            "<p style='color:#6b7280;font-size:13px'>Aucun compte n'est nécessaire : ce lien vous est personnel, ne le partagez pas. " +
+            "Ouvrez-le à l'heure de la séance depuis un ordinateur ou un téléphone, puis autorisez la caméra et le micro.</p>" +
+            "<p style='color:#6b7280;font-size:12px;word-break:break-all'>" + escape(link) + "</p>" +
+            "</div></div>";
+        return trySendEmail(to, "🎥 Invitation : " + classTitle, content);
+    }
+
     /** Email d'une notification de la plateforme (scolarité, paiements, notes, attestations). Envoyé en arrière-plan. */
     @org.springframework.scheduling.annotation.Async
     public void sendNotification(String to, String firstName, String title, String message, String link) {

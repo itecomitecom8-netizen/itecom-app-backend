@@ -115,6 +115,12 @@ public class SchoolSchemaInitializer implements ApplicationRunner {
                 + " roll_call_id BIGINT NOT NULL, email VARCHAR(255) NOT NULL, full_name VARCHAR(255), answered_at " + ts + " NOT NULL,"
                 + " CONSTRAINT uk_roll_call_answer UNIQUE (roll_call_id, email),"
                 + " CONSTRAINT fk_roll_call_answer FOREIGN KEY (roll_call_id) REFERENCES virtual_class_roll_calls(id) ON DELETE CASCADE)" + engine,
+            // Accès sans compte aux classes virtuelles (sans clé vers virtual_classes, créée plus tard par DataInitializer)
+            "CREATE TABLE IF NOT EXISTS virtual_class_invites (" + id + ","
+                + " virtual_class_id BIGINT NOT NULL, token VARCHAR(64) NOT NULL, shared BOOLEAN NOT NULL DEFAULT FALSE,"
+                + " name VARCHAR(255), email VARCHAR(255), active BOOLEAN NOT NULL DEFAULT TRUE,"
+                + " created_at " + ts + ", email_sent_at " + ts + ","
+                + " CONSTRAINT uk_virtual_class_invite_token UNIQUE (token))" + engine,
             "CREATE TABLE IF NOT EXISTS notifications (" + id + ","
                 + " user_id BIGINT NOT NULL, title VARCHAR(255) NOT NULL, message VARCHAR(1000) NOT NULL, link VARCHAR(255),"
                 + " category VARCHAR(20) NOT NULL DEFAULT 'INFO', is_read BOOLEAN NOT NULL DEFAULT FALSE, created_at " + ts + ","

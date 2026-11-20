@@ -292,7 +292,8 @@ public class VirtualClassAttendanceController {
             for (ParticipantDto p : r.students) {
                 Row x = sheet.createRow(row++);
                 x.createCell(0).setCellValue(p.name != null ? p.name : "");
-                x.createCell(1).setCellValue(p.email);
+                x.createCell(1).setCellValue(com.elearning.service.VirtualClassInviteService.isSharedGuestEmail(p.email)
+                    ? "Invité (lien partagé)" : p.email);
                 x.createCell(2).setCellValue(p.enrolled ? "Oui" : "Non");
                 x.createCell(3).setCellValue("PRESENT".equals(p.status) ? (p.online ? "Présent (en ligne)" : "Présent") : "Absent");
                 x.createCell(4).setCellValue(p.late ? "Oui" : "");

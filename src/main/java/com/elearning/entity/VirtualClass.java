@@ -46,4 +46,10 @@ public class VirtualClass {
     @OneToMany(mappedBy = "virtualClass", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<VirtualClassRollCall> rollCalls = new ArrayList<>();
+
+    /** Accès sans compte (lien partagé, invitations personnelles) ; supprimés avec la séance. */
+    @OneToMany(mappedBy = "virtualClass", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private List<VirtualClassInvite> invites = new ArrayList<>();
 }

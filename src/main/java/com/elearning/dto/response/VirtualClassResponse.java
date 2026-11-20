@@ -30,6 +30,8 @@ public class VirtualClassResponse {
     private boolean hasRecording;
     private int studentCount;
     private java.util.List<String> targetLevels;
+    private int guestCount;              // invitations personnelles (sans compte)
+    private boolean sharedLinkActive;    // lien d'invitation partagé actif
 
     public static VirtualClassResponse fromEntity(VirtualClass vc) {
         return VirtualClassResponse.builder()
