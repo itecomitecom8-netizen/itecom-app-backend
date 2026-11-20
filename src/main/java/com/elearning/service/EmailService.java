@@ -28,6 +28,18 @@ public class EmailService {
     @Value("${app.mail.enabled:false}")
     private boolean mailEnabled;
 
+    /** Clé API Brevo : si elle est définie, les emails partent par l'API HTTPS de Brevo au lieu du SMTP (bloqué sur Railway Hobby). */
+    @Value("${BREVO_API_KEY:}")
+    private String brevoApiKey;
+
+    @Value("${MAIL_FROM_NAME:ITECOM}")
+    private String mailFromName;
+
+    private static final java.net.URI BREVO_URI = java.net.URI.create("https://api.brevo.com/v3/smtp/email");
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+    private final java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+        .connectTimeout(java.time.Duration.ofSeconds(10)).build();
+
     public void sendVerificationEmail(String to, String firstName, String token) {
         String verifyUrl = frontendUrl + "/auth/verify-email?token=" + token + "&email=" + java.net.URLEncoder.encode(to, java.nio.charset.StandardCharsets.UTF_8);
         String subject = "Vérification de votre compte ELearning";
@@ -189,6 +201,9 @@ public class EmailService {
             log.warn("Email désactivé (APP_MAIL_ENABLED=false), message non envoyé à {}: {}", to, subject);
             return "l'envoi d'emails est désactivé sur le serveur (variable APP_MAIL_ENABLED=false)";
         }
+        if (brevoApiKey != null && !brevoApiKey.isBlank()) {
+            return sendWithBrevo(to, subject, htmlContent);
+        }
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
@@ -202,6 +217,44 @@ public class EmailService {
             // A mail outage must not roll back grading or account operations.
             log.warn("Email non envoyé à {}: {}", to, e.getMessage());
             return describeMailError(e);
+        }
+    }
+
+    /** Envoi par l'API transactionnelle Brevo ; retourne null si accepté, sinon la raison de l'échec. */
+    private String sendWithBrevo(String to, String subject, String htmlContent) {
+        try {
+            java.util.Map<String, Object> body = java.util.Map.of(
+                "sender", java.util.Map.of("email", mailFrom, "name", mailFromName),
+                "to", java.util.List.of(java.util.Map.of("email", to)),
+                "subject", subject,
+                "htmlContent", htmlContent);
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(BREVO_URI)
+                .timeout(java.time.Duration.ofSeconds(20))
+                .header("api-key", brevoApiKey)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
+                .build();
+            java.net.http.HttpResponse<String> response =
+                httpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() / 100 == 2) {
+                return null;
+            }
+            log.warn("Email non envoyé à {} (Brevo HTTP {}): {}", to, response.statusCode(), response.body());
+            if (response.statusCode() == 401) {
+                return "Brevo a refusé la clé API (vérifiez la variable BREVO_API_KEY)";
+            }
+            String detail = response.body() == null ? "" : response.body();
+            return "Brevo a refusé l'envoi (HTTP " + response.statusCode() + ") : "
+                + (detail.length() > 300 ? detail.substring(0, 300) : detail)
+                + (detail.toLowerCase().contains("sender") ? " — l'adresse MAIL_FROM doit être un expéditeur validé dans Brevo" : "");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Email non envoyé à {}: envoi Brevo interrompu", to);
+            return "envoi interrompu";
+        } catch (java.io.IOException e) {
+            log.warn("Email non envoyé à {} (Brevo): {}", to, e.getMessage());
+            return "impossible de joindre l'API Brevo (" + e.getMessage() + ")";
         }
     }
 
