@@ -28,7 +28,7 @@ class VirtualClassControllerTest {
     private final StudentAudienceService audience = mock(StudentAudienceService.class);
     private final VirtualClassController controller = new VirtualClassController(repo, users,
         mock(CourseRepository.class), mock(StudentListParserService.class), mock(JitsiTokenService.class), audience,
-        mock(com.elearning.service.RecordingStorageService.class));
+        mock(com.elearning.service.RecordingStorageService.class), mock(com.elearning.service.VirtualClassInviteService.class));
 
     private UserDetails as(Long id, Role role, String level) {
         String email = "u" + id + "@test.com";
