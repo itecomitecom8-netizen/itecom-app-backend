@@ -54,6 +54,10 @@ public class VirtualClassAttendanceController {
         User user = userRepository.findByEmail(auth.getName()).orElseThrow();
         if (!canJoin(vc, user)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
 
+        // Le professeur dans la salle : la séance est en direct, quel que soit le chemin pris pour y entrer
+        // (bouton « Démarrer », tableau de bord, lien direct). Les invités sans compte peuvent alors entrer.
+        if (isHost(vc, user) && "SCHEDULED".equals(vc.getStatus())) vc.setStatus("ONGOING");
+
         LocalDateTime now = LocalDateTime.now();
         // Une connexion restée ouverte (onglet fermé brutalement) est clôturée à son dernier signe de vie
         attendanceRepository.findByVirtualClassOrderByJoinedAtAsc(vc).stream()
