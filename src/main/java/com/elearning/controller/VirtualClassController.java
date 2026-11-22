@@ -125,8 +125,17 @@ public class VirtualClassController {
     public ResponseEntity<VirtualClassResponse> create(
             @RequestPart("class") VirtualClass data,
             @RequestPart(value = "studentList", required = false) MultipartFile studentListFile,
-            @RequestParam(value = "shareLink", defaultValue = "false") boolean shareLink,
+            @RequestParam(value = "teacherId", required = false) Long teacherId,
             @AuthenticationPrincipal UserDetails userDetails) {
+        // L'administrateur crée la séance et choisit son professeur ; professeur et étudiants
+        // y entrent ensuite par le même lien (le professeur, connecté, y est reconnu comme animateur).
+        User creator = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
+        if (creator.getRole() != Role.ROLE_ADMIN) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        User teacher = teacherId == null ? null : userRepository.findById(teacherId)
+            .filter(u -> u.getRole() == Role.ROLE_TEACHER).orElse(null);
+        if (teacher == null) throw new IllegalArgumentException("Choisissez le professeur qui anime la séance.");
         // Liste : les personnes qui ont un compte étudiant y sont inscrites, les autres reçoivent une invitation
         // personnelle par email (sans compte). S'y ajoutent les niveaux entiers et, au choix, un lien partagé.
         final List<StudentListParserService.StudentInfo> studentInfos;
@@ -147,10 +156,6 @@ public class VirtualClassController {
         }
         data.setTargetLevels(com.elearning.service.StudentAudienceService.normalizeLevels(
             com.elearning.service.StudentAudienceService.levelList(data.getTargetLevels())));
-        if (studentInfos.isEmpty() && data.getTargetLevels() == null && !shareLink) {
-            throw new IllegalArgumentException("Choisissez au moins un niveau, un étudiant ou un lien d'invitation.");
-        }
-        User teacher = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
         data.setTeacher(teacher);
         data.setStatus("SCHEDULED");
         data.setRoomName("elearning-" + UUID.randomUUID());
@@ -174,7 +179,8 @@ public class VirtualClassController {
                 .build()));
         if (data.getInvites() == null) data.setInvites(new ArrayList<>());
         VirtualClass saved = virtualClassRepository.save(data);
-        if (shareLink) inviteService.enableSharedLink(saved, false);
+        // Lien unique de la séance, pour le professeur comme pour les étudiants
+        inviteService.enableSharedLink(saved, false);
         if (!guests.isEmpty()) inviteService.addGuests(saved, guests);
         return ResponseEntity.ok(toResponse(saved));
     }

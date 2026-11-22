@@ -151,12 +151,14 @@ public class VirtualClassInviteController {
     @Data static class InviteInfoDto {
         String title; String description; String scheduledAt; Integer durationMinutes; String teacherName; String status;
         boolean shared; String guestName; boolean canJoin; String message;
+        /** Séance à ouvrir en animateur : le visiteur connecté en est le professeur (ou l'administrateur). */
+        Long hostClassId;
     }
     @Data static class JoinInput { String name; String session; }
 
     @GetMapping("/api/public/virtual-classes/invite/{token}")
     @Transactional(readOnly = true)
-    public ResponseEntity<?> inviteInfo(@PathVariable String token) {
+    public ResponseEntity<?> inviteInfo(@PathVariable String token, Authentication auth) {
         VirtualClassInvite invite = inviteRepository.findByToken(token).orElse(null);
         if (invite == null) return notFound();
         VirtualClass vc = invite.getVirtualClass();
@@ -170,6 +172,11 @@ public class VirtualClassInviteController {
         d.guestName = invite.isShared() ? null : invite.getName();
         d.message = refusal(invite);
         d.canJoin = d.message == null;
+        if (invite.isActive() && auth != null && auth.isAuthenticated()) {
+            userRepository.findByEmail(auth.getName())
+                .filter(u -> VirtualClassAttendanceController.isHost(vc, u))
+                .ifPresent(u -> d.hostClassId = vc.getId());
+        }
         return ResponseEntity.ok(d);
     }
 
