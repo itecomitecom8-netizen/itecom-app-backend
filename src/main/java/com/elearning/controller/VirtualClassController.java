@@ -45,7 +45,8 @@ public class VirtualClassController {
     private VirtualClassResponse toResponse(VirtualClass vc) {
         VirtualClassResponse r = VirtualClassResponse.fromEntity(vc);
         r.setStudentCount(audienceService.virtualClassAudience(vc).size());
-        r.setHasRecording(recordingStorage.hasRecording(vc));
+        r.setHasRecording(recordingStorage.playable(vc));
+        r.setRecordingLost(recordingStorage.lost(vc));
         r.setRecordingUrl(recordingStorage.playbackUrl(vc));
         r.setRecordingLightUrl(recordingStorage.lightUrl(vc));
         r.setGuestCount((int) vc.getInvites().stream().filter(i -> !i.isShared()).count());

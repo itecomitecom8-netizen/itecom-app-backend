@@ -46,6 +46,16 @@ public class RecordingStorageService {
             || (vc.getRecordingData() != null && !vc.getRecordingData().isEmpty());
     }
 
+    /** Lisible : fichier présent sur le disque, ou copie encore en base. */
+    public boolean playable(VirtualClass vc) {
+        return fileAvailable(vc) || (vc.getRecordingData() != null && !vc.getRecordingData().isEmpty());
+    }
+
+    /** Enregistrement fait, mais fichier disparu du disque (redéploiement sans volume) et sans copie en base. */
+    public boolean lost(VirtualClass vc) {
+        return hasRecording(vc) && !playable(vc);
+    }
+
     /** Le fichier de l'enregistrement est-il présent sur le disque ? */
     public boolean fileAvailable(VirtualClass vc) {
         return fileStorageService.exists(vc.getRecordingUrl());
@@ -54,7 +64,7 @@ public class RecordingStorageService {
     /** Adresse de lecture : version optimisée si prête, sinon l'original (ou l'ancien point d'accès base64). */
     public String playbackUrl(VirtualClass vc) {
         if (fileAvailable(vc)) return videoOptimizer.bestUrl(vc.getRecordingUrl());
-        return hasRecording(vc) ? "/api/virtual-classes/" + vc.getId() + "/recording" : null;
+        return playable(vc) ? "/api/virtual-classes/" + vc.getId() + "/recording" : null;
     }
 
     public String lightUrl(VirtualClass vc) {

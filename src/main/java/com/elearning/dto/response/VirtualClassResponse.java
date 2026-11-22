@@ -28,6 +28,7 @@ public class VirtualClassResponse {
     private LocalDateTime createdAt;
     private String thumbnailData;
     private boolean hasRecording;
+    private boolean recordingLost;      // enregistré, mais fichier perdu sur le serveur
     private int studentCount;
     private java.util.List<String> targetLevels;
     private int guestCount;              // invitations personnelles (sans compte)
