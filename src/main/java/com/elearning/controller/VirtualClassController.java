@@ -89,12 +89,16 @@ public class VirtualClassController {
         }
 
         String displayName = user.getFirstName() + " " + user.getLastName();
+        // Le professeur de la séance se reconnaît dans la salle
+        boolean assignedTeacher = virtualClass.getTeacher() != null && virtualClass.getTeacher().getId().equals(user.getId());
+        if (assignedTeacher) displayName += " (Professeur)";
         String token = jitsiTokenService.createToken(
             virtualClass.getRoomName(), user.getId(), displayName, user.getEmail(), host);
         return ResponseEntity.ok(Map.of(
             "token", token,
             "domain", jitsiTokenService.getDomain(),
-            "roomName", jitsiTokenService.getRoomName(virtualClass.getRoomName())));
+            "roomName", jitsiTokenService.getRoomName(virtualClass.getRoomName()),
+            "displayName", displayName));
     }
 
     @GetMapping("/api/virtual-classes/{id}/recording")
@@ -211,7 +215,8 @@ public class VirtualClassController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         recordingStorage.store(vc, file, thumbnailBase64);
-        vc.setStatus("COMPLETED");
+        // L'enregistrement peut s'arrêter en plein cours (bouton, fin du partage d'écran) : la séance
+        // ne se termine que lorsque le professeur clique sur « Terminer »
         return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
     }
 

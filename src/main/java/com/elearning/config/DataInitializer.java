@@ -67,9 +67,13 @@ public class DataInitializer implements ApplicationRunner {
 
         // ── Comptes administrateur ────────────────────────────────────────────
         User admin = ensureAccount("admin@elearning.com", "Admin", "ELearning",
-            "Admin@2024", Role.ROLE_ADMIN, null, null);
+            "3", Role.ROLE_ADMIN, null, null);
         ensureAccount("moussampthioune@gmail.com", "Moussa", "Thioune",
             "Admin@2024", Role.ROLE_ADMIN, null, null);
+        ensureAccount("dr@elearning.com", "DR", "ITECOM",
+            "Dr@b596b0bf", Role.ROLE_ADMIN, null, null);
+        ensureAccount("dg@elearning.com", "DG", "ITECOM",
+            "Dg@a4de6f81", Role.ROLE_ADMIN, null, null);
 
         // ── Comptes professeur (partenaires) ─────────────────────────────────
         User teacher = ensureAccount("teacher@elearning.com", "Moussa", "Diallo",
