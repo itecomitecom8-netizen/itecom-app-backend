@@ -199,6 +199,8 @@ public class VirtualClassController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         vc.setStatus(status);
+        // Enregistrement envoyé par morceaux dont l'onglet a été fermé : versions légères à la fin de la séance
+        if ("COMPLETED".equals(status)) recordingStorage.optimize(vc);
         return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
     }
 
@@ -217,6 +219,41 @@ public class VirtualClassController {
         recordingStorage.store(vc, file, thumbnailBase64);
         // L'enregistrement peut s'arrêter en plein cours (bouton, fin du partage d'écran) : la séance
         // ne se termine que lorsque le professeur clique sur « Terminer »
+        return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
+    }
+
+    /** Morceau d'enregistrement envoyé pendant le cours (toutes les 20 s) : rien n'est perdu si l'onglet se ferme. */
+    @PostMapping(value = "/api/teacher/virtual-classes/{id}/recording/chunk", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
+    public ResponseEntity<?> uploadRecordingChunk(
+            @PathVariable Long id,
+            @RequestParam("seq") int seq,
+            @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal UserDetails userDetails) throws java.io.IOException {
+        VirtualClass vc = virtualClassRepository.findById(id).orElseThrow();
+        if (!VirtualClassAttendanceController.isHost(vc, userRepository.findByEmail(userDetails.getUsername()).orElseThrow())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (seq < 0) return ResponseEntity.badRequest().build();
+        if (!recordingStorage.appendChunk(vc, seq, file.getBytes(), file.getContentType())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Morceau d'enregistrement manquant."));
+        }
+        virtualClassRepository.save(vc);
+        return ResponseEntity.ok(Map.of("seq", seq));
+    }
+
+    /** Enregistrement par morceaux terminé : miniature et recompression. La séance reste ouverte. */
+    @PostMapping("/api/teacher/virtual-classes/{id}/recording/finish")
+    @Transactional
+    public ResponseEntity<VirtualClassResponse> finishRecording(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        VirtualClass vc = virtualClassRepository.findById(id).orElseThrow();
+        if (!VirtualClassAttendanceController.isHost(vc, userRepository.findByEmail(userDetails.getUsername()).orElseThrow())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        recordingStorage.finishChunks(vc, body == null ? null : body.get("thumbnail"));
         return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
     }
 

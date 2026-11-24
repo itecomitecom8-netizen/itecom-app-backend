@@ -71,6 +71,15 @@ public class FileStorageService {
         }
     }
 
+    /** Ajoute des octets à la fin d'un fichier déjà stocké (enregistrement envoyé par morceaux pendant le cours). */
+    public void append(String url, byte[] data) throws IOException {
+        if (url == null || !url.startsWith("/uploads/")) throw new IOException("URL de fichier invalide : " + url);
+        Path root = Paths.get(uploadDir).toAbsolutePath().normalize();
+        Path path = root.resolve(url.substring("/uploads/".length())).normalize();
+        if (!path.startsWith(root) || !Files.isRegularFile(path)) throw new IOException("Fichier introuvable : " + url);
+        Files.write(path, data, java.nio.file.StandardOpenOption.APPEND);
+    }
+
     /** Stores raw bytes (e.g. a generated PDF) under uploadDir/subDirectory and returns the public URL. */
     public String storeBytes(byte[] data, String subDirectory, String extension) throws IOException {
         Path targetDir = Paths.get(uploadDir, subDirectory).toAbsolutePath().normalize();

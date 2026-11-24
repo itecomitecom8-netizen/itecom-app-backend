@@ -85,6 +85,53 @@ public class RecordingStorageService {
         videoOptimizer.optimizeLater(url);
     }
 
+    /** Prochain morceau attendu par séance (les morceaux arrivent dans l'ordre, un renvoi est ignoré). */
+    private final java.util.Map<Long, Integer> nextChunk = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Morceau d'enregistrement envoyé pendant le cours : le morceau 0 ouvre un nouveau fichier (qui remplace
+     * l'ancien enregistrement), les suivants s'y ajoutent. Le fichier est lisible à tout moment, même si le
+     * professeur ferme l'onglet sans arrêter l'enregistrement.
+     * @return false si le morceau arrive dans le désordre (un morceau précédent manque)
+     */
+    public synchronized boolean appendChunk(VirtualClass vc, int seq, byte[] data, String mimeType) throws IOException {
+        if (data == null || data.length == 0) return true;
+        if (seq == 0) {
+            String previous = vc.getRecordingUrl();
+            String url = fileStorageService.storeBytes(data, DIR, ".webm");
+            vc.setRecordingUrl(url);
+            vc.setRecordingData(null);
+            vc.setRecordingMimeType(mimeType != null && !mimeType.isBlank() ? mimeType : "video/webm");
+            vc.setRecordingFilename("session-" + vc.getId() + ".webm");
+            deleteFiles(previous);
+            nextChunk.put(vc.getId(), 1);
+            return true;
+        }
+        Integer expected = nextChunk.get(vc.getId());
+        if (expected != null && seq < expected) return true;   // déjà reçu (renvoi après une coupure réseau)
+        if (expected != null && seq > expected) return false;  // un morceau manque
+        if (!fileAvailable(vc)) return false;
+        fileStorageService.append(vc.getRecordingUrl(), data);
+        nextChunk.put(vc.getId(), seq + 1);
+        return true;
+    }
+
+    /** Fin de l'enregistrement envoyé par morceaux : miniature, puis versions recompressées. */
+    public void finishChunks(VirtualClass vc, String thumbnailBase64) {
+        nextChunk.remove(vc.getId());
+        if (thumbnailBase64 != null && !thumbnailBase64.isBlank()) vc.setThumbnailData(thumbnailBase64);
+        String url = vc.getRecordingUrl();
+        if (url == null) return;
+        // Des versions faites sur un fichier encore incomplet (redémarrage pendant le cours) seraient tronquées
+        videoOptimizer.deleteVariants(url);
+        videoOptimizer.optimizeLater(url);
+    }
+
+    /** Lance la recompression de l'enregistrement s'il n'est pas déjà fait. */
+    public void optimize(VirtualClass vc) {
+        if (fileAvailable(vc)) videoOptimizer.optimizeLater(vc.getRecordingUrl());
+    }
+
     public void delete(VirtualClass vc) {
         deleteFiles(vc.getRecordingUrl());
         vc.setRecordingUrl(null);
