@@ -41,6 +41,9 @@ public class VirtualClassInviteController {
     private final VirtualClassRollCallService rollCallService;
     private final JitsiTokenService jitsiTokenService;
 
+    /** Invité considéré comme encore connecté s'il a donné signe de vie dans ce délai (signe toutes les 30 s). */
+    private static final long ACTIVE_SECONDS = 90;
+
     // ── Professeur ────────────────────────────────────────────────────────
 
     @Data static class GuestDto { Long id; String name; String email; String link; boolean active; String emailSentAt; }
@@ -208,7 +211,21 @@ public class VirtualClassInviteController {
         }
         VirtualClass vc = invite.getVirtualClass();
         LocalDateTime now = LocalDateTime.now();
-        // Une connexion restée ouverte (onglet fermé brutalement) est clôturée à son dernier signe de vie
+        // Un seul appareil par personne : sur le lien partagé, le même nom déjà connecté ailleurs est refusé
+        // (on ne déconnecte pas l'autre : n'importe qui pourrait sinon taper le nom d'un étudiant pour l'exclure)
+        if (invite.isShared()) {
+            boolean elsewhere = attendanceRepository.findByVirtualClassOrderByJoinedAtAsc(vc).stream()
+                .anyMatch(a -> a.getLeftAt() == null && !a.getEmail().equalsIgnoreCase(guest.email)
+                    && a.getFullName() != null && a.getFullName().equalsIgnoreCase(guest.name)
+                    && a.getLastSeenAt() != null && a.getLastSeenAt().isAfter(now.minusSeconds(ACTIVE_SECONDS)));
+            if (elsewhere) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message",
+                    "« " + guest.name.replace(" (invité)", "") + " » est déjà connecté(e) sur un autre appareil. "
+                    + "Une seule connexion par personne : quittez la séance sur l'autre appareil, puis réessayez dans une minute."));
+            }
+        }
+        // Une connexion restée ouverte (onglet fermé brutalement, autre onglet ou autre appareil du même invité)
+        // est clôturée : l'ancienne page le découvre à son prochain signe de vie et quitte la salle
         attendanceRepository.findByVirtualClassOrderByJoinedAtAsc(vc).stream()
             .filter(a -> a.getLeftAt() == null && a.getEmail().equalsIgnoreCase(guest.email))
             .forEach(a -> a.setLeftAt(a.getLastSeenAt() != null ? a.getLastSeenAt() : a.getJoinedAt()));
@@ -231,7 +248,12 @@ public class VirtualClassInviteController {
                                        @RequestParam(required = false) String session) {
         VirtualClassAttendance a = ownAttendance(token, attendanceId, session);
         if (a == null) return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        if (a.getLeftAt() == null) a.setLastSeenAt(LocalDateTime.now());
+        // Connexion clôturée par une entrée depuis un autre appareil ou onglet : cette page doit quitter la salle
+        if (a.getLeftAt() != null) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", "REPLACED", "message",
+                "Vous êtes entré(e) dans la séance depuis un autre appareil ou onglet : une seule connexion par personne."));
+        }
+        a.setLastSeenAt(LocalDateTime.now());
         return ResponseEntity.ok(Map.of("ok", true));
     }
 

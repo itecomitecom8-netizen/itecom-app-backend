@@ -37,8 +37,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             String jwt = parseJwt(request);
             if (jwt != null && jwtUtils.validateToken(jwt) && !jwtUtils.isRefreshToken(jwt)) {
                 String email = jwtUtils.getEmailFromToken(jwt);
-                // Une seule session par compte : le jeton d'une session remplacée n'est plus accepté
-                String current = userRepository.findByEmail(email).map(com.elearning.entity.User::getSessionId).orElse(null);
+                // Un seul appareil par compte : le jeton d'une session remplacée n'est plus accepté.
+                // Sauf le professeur, qui peut être connecté sur plusieurs appareils (ex. ordinateur pour
+                // partager son écran et téléphone).
+                com.elearning.entity.User account = userRepository.findByEmail(email).orElse(null);
+                String current = account == null || account.getRole() == com.elearning.entity.Role.ROLE_TEACHER
+                    ? null : account.getSessionId();
                 if (current != null && !current.equals(jwtUtils.getSessionId(jwt))) {
                     request.setAttribute(SESSION_REPLACED, true);
                     filterChain.doFilter(request, response);

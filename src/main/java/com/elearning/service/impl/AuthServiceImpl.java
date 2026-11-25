@@ -104,7 +104,9 @@ public class AuthServiceImpl implements AuthService {
             throw new org.springframework.security.authentication.BadCredentialsException("Session expirée : veuillez vous reconnecter.");
         }
         String sid = jwtUtils.getSessionId(refreshToken);
-        if (user.getSessionId() != null && !user.getSessionId().equals(sid)) {
+        // Un seul appareil par compte, sauf le professeur
+        if (user.getRole() != com.elearning.entity.Role.ROLE_TEACHER
+                && user.getSessionId() != null && !user.getSessionId().equals(sid)) {
             throw new com.elearning.exception.SessionReplacedException();
         }
         return session(user, sid != null ? sid : UUID.randomUUID().toString());

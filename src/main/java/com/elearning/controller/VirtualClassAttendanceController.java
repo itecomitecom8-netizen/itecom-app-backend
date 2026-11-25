@@ -59,8 +59,9 @@ public class VirtualClassAttendanceController {
         if (isHost(vc, user) && "SCHEDULED".equals(vc.getStatus())) vc.setStatus("ONGOING");
 
         LocalDateTime now = LocalDateTime.now();
-        // Une connexion restée ouverte (onglet fermé brutalement) est clôturée à son dernier signe de vie
-        attendanceRepository.findByVirtualClassOrderByJoinedAtAsc(vc).stream()
+        // Une connexion restée ouverte (onglet fermé brutalement) est clôturée à son dernier signe de vie.
+        // Le professeur peut être connecté sur plusieurs appareils : ses autres connexions restent ouvertes.
+        if (user.getRole() != Role.ROLE_TEACHER) attendanceRepository.findByVirtualClassOrderByJoinedAtAsc(vc).stream()
             .filter(a -> a.getLeftAt() == null && a.getEmail().equalsIgnoreCase(user.getEmail()))
             .forEach(a -> a.setLeftAt(a.getLastSeenAt() != null ? a.getLastSeenAt() : a.getJoinedAt()));
 
