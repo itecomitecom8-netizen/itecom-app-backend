@@ -60,6 +60,32 @@ public class VirtualClassInviteService {
         return inviteRepository.save(link);
     }
 
+    /**
+     * Redonne à la séance un ancien lien partagé (adresse complète ou seulement son jeton), par exemple déjà
+     * envoyé sur WhatsApp avant que sa séance soit supprimée ou que le lien soit remplacé.
+     */
+    public VirtualClassInvite restoreSharedLink(VirtualClass vc, String linkOrToken) {
+        String value = linkOrToken == null ? "" : linkOrToken.trim();
+        int q = value.indexOf('?');
+        if (q >= 0) value = value.substring(0, q);
+        while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
+        String token = value.substring(value.lastIndexOf('/') + 1);
+        if (!token.matches("[A-Za-z0-9_-]{12,64}")) {
+            throw new IllegalArgumentException("Adresse non reconnue : collez le lien complet, par exemple …/classe/AbC123….");
+        }
+        VirtualClassInvite owner = inviteRepository.findByToken(token).orElse(null);
+        if (owner != null && !owner.getVirtualClass().getId().equals(vc.getId())) {
+            throw new IllegalArgumentException("Ce lien est déjà utilisé par la séance « " + owner.getVirtualClass().getTitle() + " ».");
+        }
+        if (owner != null && !owner.isShared()) {
+            throw new IllegalArgumentException("Ce lien est une invitation personnelle de cette séance, pas son lien partagé.");
+        }
+        VirtualClassInvite link = enableSharedLink(vc, false);
+        link.setToken(token);
+        link.setActive(true);
+        return inviteRepository.save(link);
+    }
+
     public void disableSharedLink(VirtualClass vc) {
         sharedLink(vc).ifPresent(l -> l.setActive(false));
     }

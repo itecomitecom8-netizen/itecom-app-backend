@@ -66,6 +66,18 @@ public class VirtualClassInviteController {
         return ResponseEntity.ok(invitesDto(vc));
     }
 
+    @Data static class RestoreLinkInput { String link; }
+
+    /** Admin : la séance reprend un ancien lien (déjà partagé), qui fonctionne de nouveau. */
+    @PostMapping("/api/admin/virtual-classes/{id}/invites/link/restore")
+    @Transactional
+    public ResponseEntity<?> restoreLink(@PathVariable Long id, @RequestBody RestoreLinkInput input) {
+        VirtualClass vc = virtualClassRepository.findById(id).orElse(null);
+        if (vc == null) return ResponseEntity.notFound().build();
+        inviteService.restoreSharedLink(vc, input.link);
+        return ResponseEntity.ok(invitesDto(vc));
+    }
+
     @DeleteMapping("/api/teacher/virtual-classes/{id}/invites/link")
     @Transactional
     public ResponseEntity<?> disableLink(@PathVariable Long id, Authentication auth) {
