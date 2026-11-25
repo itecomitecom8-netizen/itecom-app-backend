@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 /**
- * Appel en classe virtuelle : le professeur le lance (rappel toutes les 15 minutes), chaque étudiant connecté
+ * Appel en classe virtuelle : le professeur le lance (rappel toutes les 20 minutes), chaque étudiant connecté
  * reçoit « Je suis présent » et a {@link #WINDOW_MINUTES} minutes pour répondre.
  */
 @Service

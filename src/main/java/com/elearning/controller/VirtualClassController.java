@@ -247,10 +247,36 @@ public class VirtualClassController {
         if (!VirtualClassAttendanceController.isHost(vc, userRepository.findByEmail(userDetails.getUsername()).orElseThrow())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
+        // Quelqu'un d'autre enregistre cette séance en ce moment : on n'écrase pas son enregistrement
+        if (recordingStorage.recordedByOther(vc, userDetails.getUsername())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
         recordingStorage.store(vc, file, thumbnailBase64);
         // L'enregistrement peut s'arrêter en plein cours (bouton, fin du partage d'écran) : la séance
         // ne se termine que lorsque le professeur clique sur « Terminer »
         return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
+    }
+
+    /**
+     * Réserve l'enregistrement avant de le lancer : professeur de la séance ou administrateur (admin, DR, DG…),
+     * une seule personne à la fois pour ne pas écraser l'enregistrement d'un autre.
+     */
+    @PostMapping("/api/teacher/virtual-classes/{id}/recording/start")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> startRecording(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        VirtualClass vc = virtualClassRepository.findById(id).orElseThrow();
+        User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
+        if (!VirtualClassAttendanceController.isHost(vc, user)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message",
+                "Seuls le professeur de la séance et les administrateurs peuvent enregistrer le cours."));
+        }
+        String busy = recordingStorage.claim(vc, user.getEmail(), user.getFirstName() + " " + user.getLastName());
+        if (busy != null) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message",
+                busy + " enregistre déjà ce cours. Un seul enregistrement à la fois : il sera disponible dans l'onglet « Passées ».",
+                "recordingBy", busy));
+        }
+        return ResponseEntity.ok(Map.of("message", "Enregistrement réservé."));
     }
 
     /** Morceau d'enregistrement envoyé pendant le cours (toutes les 20 s) : rien n'est perdu si l'onglet se ferme. */
@@ -266,7 +292,7 @@ public class VirtualClassController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         if (seq < 0) return ResponseEntity.badRequest().build();
-        if (!recordingStorage.appendChunk(vc, seq, file.getBytes(), file.getContentType())) {
+        if (!recordingStorage.appendChunk(vc, userDetails.getUsername(), seq, file.getBytes(), file.getContentType())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "Morceau d'enregistrement manquant."));
         }
         virtualClassRepository.save(vc);

@@ -94,7 +94,47 @@ public class RecordingStorageService {
      * professeur ferme l'onglet sans arrêter l'enregistrement.
      * @return false si le morceau arrive dans le désordre (un morceau précédent manque)
      */
-    public synchronized boolean appendChunk(VirtualClass vc, int seq, byte[] data, String mimeType) throws IOException {
+    /** Qui enregistre chaque séance : un seul enregistrement à la fois (professeur, administrateur, DR, DG…). */
+    private record Recorder(String email, String name, long lastSeen) {}
+    private final java.util.Map<Long, Recorder> recorders = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Sans morceau reçu depuis ce délai, l'enregistrement est considéré comme abandonné (onglet fermé). */
+    private static final long RECORDER_TIMEOUT_MS = 60_000;
+
+    /**
+     * Réserve l'enregistrement de la séance pour cette personne.
+     * @return le nom de la personne qui enregistre déjà, ou null si la réservation est accordée
+     */
+    public synchronized String claim(VirtualClass vc, String email, String name) {
+        Recorder current = recorders.get(vc.getId());
+        long now = System.currentTimeMillis();
+        if (current != null && !current.email().equalsIgnoreCase(email) && now - current.lastSeen() < RECORDER_TIMEOUT_MS) {
+            return current.name();
+        }
+        recorders.put(vc.getId(), new Recorder(email, name, now));
+        return null;
+    }
+
+    /** Personne qui enregistre la séance en ce moment (null si personne). */
+    public String recordingBy(VirtualClass vc) {
+        Recorder current = recorders.get(vc.getId());
+        return current != null && System.currentTimeMillis() - current.lastSeen() < RECORDER_TIMEOUT_MS ? current.name() : null;
+    }
+
+    /** Une autre personne enregistre-t-elle cette séance en ce moment ? */
+    public boolean recordedByOther(VirtualClass vc, String email) {
+        Recorder current = recorders.get(vc.getId());
+        return current != null && !current.email().equalsIgnoreCase(email)
+            && System.currentTimeMillis() - current.lastSeen() < RECORDER_TIMEOUT_MS;
+    }
+
+    public synchronized boolean appendChunk(VirtualClass vc, String email, int seq, byte[] data, String mimeType) throws IOException {
+        Recorder current = recorders.get(vc.getId());
+        if (current != null && !current.email().equalsIgnoreCase(email)
+            && System.currentTimeMillis() - current.lastSeen() < RECORDER_TIMEOUT_MS) {
+            return false;   // quelqu'un d'autre enregistre : on ne touche pas à son fichier
+        }
+        recorders.put(vc.getId(), new Recorder(email, current != null && current.email().equalsIgnoreCase(email) ? current.name() : email,
+            System.currentTimeMillis()));
         if (data == null || data.length == 0) return true;
         if (seq == 0) {
             String previous = vc.getRecordingUrl();
@@ -119,6 +159,7 @@ public class RecordingStorageService {
     /** Fin de l'enregistrement envoyé par morceaux : miniature, puis versions recompressées. */
     public void finishChunks(VirtualClass vc, String thumbnailBase64) {
         nextChunk.remove(vc.getId());
+        recorders.remove(vc.getId());
         if (thumbnailBase64 != null && !thumbnailBase64.isBlank()) vc.setThumbnailData(thumbnailBase64);
         String url = vc.getRecordingUrl();
         if (url == null) return;
@@ -134,6 +175,7 @@ public class RecordingStorageService {
 
     public void delete(VirtualClass vc) {
         nextChunk.remove(vc.getId());
+        recorders.remove(vc.getId());
         deleteFiles(vc.getRecordingUrl());
         vc.setRecordingUrl(null);
         vc.setRecordingData(null);
