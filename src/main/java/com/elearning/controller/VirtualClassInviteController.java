@@ -41,9 +41,6 @@ public class VirtualClassInviteController {
     private final VirtualClassRollCallService rollCallService;
     private final JitsiTokenService jitsiTokenService;
 
-    /** Invité considéré comme encore connecté s'il a donné signe de vie dans ce délai (signe toutes les 30 s). */
-    private static final long ACTIVE_SECONDS = 90;
-
     // ── Professeur ────────────────────────────────────────────────────────
 
     @Data static class GuestDto { Long id; String name; String email; String link; boolean active; String emailSentAt; }
@@ -211,19 +208,8 @@ public class VirtualClassInviteController {
         }
         VirtualClass vc = invite.getVirtualClass();
         LocalDateTime now = LocalDateTime.now();
-        // Un seul appareil par personne : sur le lien partagé, le même nom déjà connecté ailleurs est refusé
-        // (on ne déconnecte pas l'autre : n'importe qui pourrait sinon taper le nom d'un étudiant pour l'exclure)
-        if (invite.isShared()) {
-            boolean elsewhere = attendanceRepository.findByVirtualClassOrderByJoinedAtAsc(vc).stream()
-                .anyMatch(a -> a.getLeftAt() == null && !a.getEmail().equalsIgnoreCase(guest.email)
-                    && a.getFullName() != null && a.getFullName().equalsIgnoreCase(guest.name)
-                    && a.getLastSeenAt() != null && a.getLastSeenAt().isAfter(now.minusSeconds(ACTIVE_SECONDS)));
-            if (elsewhere) {
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message",
-                    "« " + guest.name.replace(" (invité)", "") + " » est déjà connecté(e) sur un autre appareil. "
-                    + "Une seule connexion par personne : quittez la séance sur l'autre appareil, puis réessayez dans une minute."));
-            }
-        }
+        // Lien partagé : pas de refus sur le nom. Deux étudiants peuvent porter le même nom, et celui
+        // qui change d'appareil (téléphone déchargé, passage au Wi-Fi) doit pouvoir rentrer tout de suite.
         // Une connexion restée ouverte (onglet fermé brutalement, autre onglet ou autre appareil du même invité)
         // est clôturée : l'ancienne page le découvre à son prochain signe de vie et quitte la salle
         attendanceRepository.findByVirtualClassOrderByJoinedAtAsc(vc).stream()
