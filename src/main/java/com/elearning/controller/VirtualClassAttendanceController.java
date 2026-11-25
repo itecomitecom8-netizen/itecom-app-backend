@@ -322,9 +322,10 @@ public class VirtualClassAttendanceController {
 
     // ── Droits ────────────────────────────────────────────────────────────
 
-    /** Séance visible : l'administrateur, le professeur qui l'a créée, les étudiants conviés (niveau ou liste). */
+    /** Séance visible : l'administrateur, le professeur de la séance et tous les étudiants connectés. */
     static boolean canJoin(VirtualClass vc, User user) {
-        return isHost(vc, user) || com.elearning.service.StudentAudienceService.isInvited(vc, user);
+        // Tout étudiant connecté peut entrer, même s'il n'a pas été choisi à la création
+        return isHost(vc, user) || user.getRole() == Role.ROLE_STUDENT;
     }
 
     /** Anime la séance : l'administrateur ou le professeur qui l'a créée. */

@@ -151,7 +151,7 @@ public class VirtualClassInviteController {
     @Data static class InviteInfoDto {
         String title; String description; String scheduledAt; Integer durationMinutes; String teacherName; String status;
         boolean shared; String guestName; boolean canJoin; String message;
-        /** Séance à ouvrir en animateur : le visiteur connecté en est le professeur (ou l'administrateur). */
+        /** Séance à ouvrir avec son compte : professeur ou admin (animateur), ou étudiant connecté si la séance est en direct. */
         Long hostClassId;
     }
     @Data static class JoinInput { String name; String session; }
@@ -174,7 +174,8 @@ public class VirtualClassInviteController {
         d.canJoin = d.message == null;
         if (invite.isActive() && auth != null && auth.isAuthenticated()) {
             userRepository.findByEmail(auth.getName())
-                .filter(u -> VirtualClassAttendanceController.isHost(vc, u))
+                .filter(u -> VirtualClassAttendanceController.isHost(vc, u)
+                    || (d.canJoin && VirtualClassAttendanceController.canJoin(vc, u)))
                 .ifPresent(u -> d.hostClassId = vc.getId());
         }
         return ResponseEntity.ok(d);

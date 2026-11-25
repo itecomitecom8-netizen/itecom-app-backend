@@ -58,7 +58,7 @@ public class VirtualClassController {
     @Transactional(readOnly = true)
     public ResponseEntity<List<VirtualClassResponse>> getAll(@AuthenticationPrincipal UserDetails userDetails) {
         User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
-        // Professeur : ses séances ; étudiant : celles de son niveau ou de sa liste ; administrateur : toutes
+        // Professeur : ses séances ; étudiant et administrateur : toutes
         return ResponseEntity.ok(virtualClassRepository.findAll().stream()
             .filter(vc -> VirtualClassAttendanceController.canJoin(vc, user))
             .map(this::toResponse).toList());
@@ -82,7 +82,7 @@ public class VirtualClassController {
         VirtualClass virtualClass = virtualClassRepository.findById(id).orElseThrow();
         User user = userRepository.findByEmail(userDetails.getUsername()).orElseThrow();
         boolean host = VirtualClassAttendanceController.isHost(virtualClass, user);
-        boolean assignedStudent = com.elearning.service.StudentAudienceService.isInvited(virtualClass, user);
+        boolean assignedStudent = VirtualClassAttendanceController.canJoin(virtualClass, user);
 
         if (!host && !assignedStudent) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
@@ -327,9 +327,8 @@ public class VirtualClassController {
         if (!isOwner && !isAdmin) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
+        // Seule la vidéo est supprimée : la séance garde son état (et son lien reste utilisable)
         recordingStorage.delete(vc);
-        // Supprimé pendant le cours : la séance continue ; sinon elle reste dans les séances passées
-        if (!"ONGOING".equals(vc.getStatus())) vc.setStatus("COMPLETED");
         return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
     }
 
