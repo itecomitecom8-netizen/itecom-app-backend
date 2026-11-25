@@ -150,11 +150,11 @@ public class VideoOptimizationService {
         }
     }
 
-    /** 720p maximum, H.264 qualité moyenne, son mono 64 kbit/s, lecture dès les premiers octets. */
+    /** 720p maximum, H.264 bonne qualité (texte de l'écran net), son mono 96 kbit/s, lecture dès les premiers octets. */
     static List<String> optimizedArgs() {
-        return List.of("-vf", "scale=-2:'trunc(min(720,ih)/2)*2'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-            "-maxrate", "1200k", "-bufsize", "2400k", "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "64k", "-ac", "1", "-movflags", "+faststart");
+        return List.of("-vf", "scale=-2:'trunc(min(720,ih)/2)*2'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-maxrate", "2000k", "-bufsize", "4000k", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "96k", "-ac", "1", "-movflags", "+faststart");
     }
 
     /** 360p, 15 images/s, ~300 kbit/s : pour les connexions faibles et le hors connexion. */
