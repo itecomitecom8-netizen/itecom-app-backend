@@ -133,6 +133,7 @@ public class RecordingStorageService {
     }
 
     public void delete(VirtualClass vc) {
+        nextChunk.remove(vc.getId());
         deleteFiles(vc.getRecordingUrl());
         vc.setRecordingUrl(null);
         vc.setRecordingData(null);

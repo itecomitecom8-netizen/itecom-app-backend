@@ -190,6 +190,37 @@ public class VirtualClassController {
         return ResponseEntity.ok(toResponse(saved));
     }
 
+    /** Titre et durée d'une séance à venir (pas encore démarrée). */
+    @PutMapping("/api/teacher/virtual-classes/{id}")
+    @Transactional
+    public ResponseEntity<?> updateDetails(
+            @PathVariable Long id, @RequestBody Map<String, Object> body, @AuthenticationPrincipal UserDetails userDetails) {
+        VirtualClass vc = virtualClassRepository.findById(id).orElseThrow();
+        if (!VirtualClassAttendanceController.isHost(vc, userRepository.findByEmail(userDetails.getUsername()).orElseThrow())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (!"SCHEDULED".equals(vc.getStatus())) {
+            return ResponseEntity.badRequest().body(Map.of("message",
+                "Seule une séance à venir peut être modifiée : celle-ci a déjà commencé ou est terminée."));
+        }
+        String title = body.get("title") == null ? "" : body.get("title").toString().trim();
+        if (title.isEmpty() || title.length() > 255) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Saisissez un titre (255 caractères au plus)."));
+        }
+        int duration;
+        try {
+            duration = Integer.parseInt(String.valueOf(body.get("durationMinutes")).trim());
+        } catch (NumberFormatException e) {
+            duration = 0;
+        }
+        if (duration < 5 || duration > 600) {
+            return ResponseEntity.badRequest().body(Map.of("message", "La durée doit être comprise entre 5 et 600 minutes."));
+        }
+        vc.setTitle(title);
+        vc.setDurationMinutes(duration);
+        return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
+    }
+
     @PutMapping("/api/teacher/virtual-classes/{id}/status")
     @Transactional
     public ResponseEntity<VirtualClassResponse> updateStatus(
@@ -271,7 +302,8 @@ public class VirtualClassController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         recordingStorage.delete(vc);
-        vc.setStatus("COMPLETED");
+        // Supprimé pendant le cours : la séance continue ; sinon elle reste dans les séances passées
+        if (!"ONGOING".equals(vc.getStatus())) vc.setStatus("COMPLETED");
         return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
     }
 
