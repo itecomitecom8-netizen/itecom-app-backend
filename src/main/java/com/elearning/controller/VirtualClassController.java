@@ -299,6 +299,30 @@ public class VirtualClassController {
         return ResponseEntity.ok(Map.of("seq", seq));
     }
 
+    /**
+     * Import de la vidéo du cours (copie de secours après un envoi raté) : professeur de la séance ou administrateur.
+     * {@code position=before} : placée avant la vidéo existante et réunie avec elle ; sinon elle la remplace.
+     */
+    @PostMapping(value = "/api/teacher/virtual-classes/{id}/recording/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
+    public ResponseEntity<?> importRecording(
+            @PathVariable Long id,
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "position", defaultValue = "replace") String position,
+            @AuthenticationPrincipal UserDetails userDetails) throws java.io.IOException {
+        VirtualClass vc = virtualClassRepository.findById(id).orElseThrow();
+        if (!VirtualClassAttendanceController.isHost(vc, userRepository.findByEmail(userDetails.getUsername()).orElseThrow())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message",
+                "Seuls le professeur de la séance et les administrateurs peuvent importer la vidéo."));
+        }
+        try {
+            recordingStorage.importRecording(vc, file, "before".equals(position));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+        return ResponseEntity.ok(toResponse(virtualClassRepository.save(vc)));
+    }
+
     /** Enregistrement par morceaux terminé : miniature et recompression. La séance reste ouverte. */
     @PostMapping("/api/teacher/virtual-classes/{id}/recording/finish")
     @Transactional

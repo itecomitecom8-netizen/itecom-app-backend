@@ -98,7 +98,14 @@ public class RecordingStorageService {
         }
         List<String> all = new java.util.ArrayList<>(earlier);
         all.add(url);
-        Long id = vc.getId();
+        mergeInto(vc.getId(), all, url);
+    }
+
+    /**
+     * Réunit les parties dans l'ordre donné ; la séance pointe ensuite sur la vidéo réunie.
+     * @param url enregistrement actuel de la séance : si elle a changé entre-temps, on n'y touche pas
+     */
+    private void mergeInto(Long id, List<String> all, String url) {
         videoOptimizer.mergeLater(all, merged -> transactionTemplate.executeWithoutResult(tx ->
             virtualClassRepository.findById(id).ifPresent(fresh -> {
                 // Enregistrement supprimé ou remplacé entre-temps : on garde la vidéo réunie sans y toucher
@@ -110,6 +117,38 @@ public class RecordingStorageService {
                 all.forEach(this::deleteFiles);
                 videoOptimizer.optimizeLater(merged);
             })));
+    }
+
+    /**
+     * Vidéo du cours importée à la main (copie de secours, enregistrement perdu…).
+     * @param beforeExisting true : la séance a déjà une vidéo, l'importée est placée avant et les deux sont réunies ;
+     *                       false : l'importée remplace la vidéo existante
+     */
+    public void importRecording(VirtualClass vc, MultipartFile file, boolean beforeExisting) throws IOException {
+        if (file == null || file.isEmpty()) throw new IllegalArgumentException("Fichier vide.");
+        String existing = fileAvailable(vc) ? vc.getRecordingUrl() : null;
+        String name = file.getOriginalFilename() != null ? file.getOriginalFilename() : "cours.webm";
+        String ext = name.contains(".") ? name.substring(name.lastIndexOf('.')).toLowerCase(java.util.Locale.ROOT) : ".webm";
+        if (!List.of(".webm", ".mp4", ".mkv", ".mov", ".m4v").contains(ext)) {
+            throw new IllegalArgumentException("Format non pris en charge : choisissez une vidéo .webm ou .mp4.");
+        }
+        String url = fileStorageService.store(file, DIR);
+        nextChunk.remove(vc.getId());
+        recorders.remove(vc.getId());
+        currentFile.remove(vc.getId());
+        earlierParts.remove(vc.getId());
+        vc.setRecordingUrl(url);
+        vc.setRecordingData(null);
+        vc.setRecordingMimeType(file.getContentType() != null && file.getContentType().startsWith("video/") ? file.getContentType() : "video/webm");
+        vc.setRecordingFilename("session-" + vc.getId() + ext);
+        log.info("Séance {} : vidéo importée {} ({} Ko){}", vc.getId(), url, file.getSize() / 1024,
+            existing == null ? "" : beforeExisting ? ", placée avant " + existing : ", remplace " + existing);
+        if (existing != null && beforeExisting) {
+            mergeInto(vc.getId(), List.of(url, existing), url);
+        } else {
+            if (existing != null) deleteFiles(existing);
+            videoOptimizer.optimizeLater(url);
+        }
     }
 
     /** Remplace l'enregistrement en cours de la séance par le fichier envoyé (vidéo complète, en secours). */
