@@ -57,6 +57,14 @@ public class DataInitializer implements ApplicationRunner {
     @Value("${app.upload.dir}")
     private String uploadDir;
 
+    /**
+     * Comptes administrateur autorisés, séparés par des virgules (variable ADMIN_ALLOWED_ACCOUNTS).
+     * Renseignée : tout autre compte administrateur est désactivé au démarrage, ceux de la liste sont actifs.
+     * Vide : aucun changement.
+     */
+    @Value("${app.admin.allowed-accounts:}")
+    private String allowedAdminAccounts;
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
@@ -74,6 +82,7 @@ public class DataInitializer implements ApplicationRunner {
             "Dr@b596b0bf", Role.ROLE_ADMIN, null, null);
         ensureAccount("dg@elearning.com", "DG", "ITECOM",
             "Dg@a4de6f81", Role.ROLE_ADMIN, null, null);
+        restrictAdminAccounts();
 
         // ── Comptes professeur (partenaires) ─────────────────────────────────
         User teacher = ensureAccount("teacher@elearning.com", "Moussa", "Diallo",
@@ -443,6 +452,24 @@ private boolean isMysqlDatabase() {
     private void ensureMysqlColumn(String tableName, String columnName, String columnDefinition) {
         if (!columnExists(tableName, columnName)) {
             jdbcTemplate.execute("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition);
+        }
+    }
+
+    /** N'autorise que les comptes administrateur listés dans ADMIN_ALLOWED_ACCOUNTS ; les autres sont désactivés. */
+    private void restrictAdminAccounts() {
+        java.util.Set<String> allowed = java.util.Arrays.stream(allowedAdminAccounts.split(","))
+            .map(e -> e.trim().toLowerCase(Locale.ROOT)).filter(e -> !e.isEmpty())
+            .collect(java.util.stream.Collectors.toSet());
+        if (allowed.isEmpty()) return;
+        for (User u : userRepository.findAll()) {
+            if (u.getRole() != Role.ROLE_ADMIN) continue;
+            boolean keep = allowed.contains(u.getEmail().toLowerCase(Locale.ROOT));
+            if (u.isEnabled() == keep) continue;
+            u.setEnabled(keep);
+            // Compte désactivé : sa session en cours est fermée aussitôt
+            if (!keep) u.setSessionId(java.util.UUID.randomUUID().toString());
+            userRepository.save(u);
+            log.info("Compte administrateur {} : {}", keep ? "activé" : "désactivé", u.getEmail());
         }
     }
 

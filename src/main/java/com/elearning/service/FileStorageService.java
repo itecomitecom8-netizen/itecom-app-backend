@@ -58,6 +58,17 @@ public class FileStorageService {
         return path.startsWith(root) && Files.isRegularFile(path);
     }
 
+    /** Taille du fichier en octets (-1 s'il n'existe pas). */
+    public long size(String url) {
+        if (!exists(url)) return -1;
+        Path root = Paths.get(uploadDir).toAbsolutePath().normalize();
+        try {
+            return Files.size(root.resolve(url.substring("/uploads/".length())).normalize());
+        } catch (IOException e) {
+            return -1;
+        }
+    }
+
     /** Supprime un fichier stocké par ce service, à partir de son URL publique (/uploads/...). Sans effet s'il n'existe pas. */
     public void delete(String url) {
         if (url == null || !url.startsWith("/uploads/")) return;

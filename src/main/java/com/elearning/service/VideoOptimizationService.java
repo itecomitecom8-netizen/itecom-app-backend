@@ -114,6 +114,11 @@ public class VideoOptimizationService {
     public void optimizeLater(String url) {
         // Seuls les originaux sont recompressés (pas les versions déjà produites)
         if (!enabled || url == null || !url.startsWith("/uploads/") || !isVideo(url)) return;
+        // Versions faites avant la fin de l'enregistrement (morceaux ajoutés depuis) : elles sont refaites en entier
+        if (variantsOutdated(url)) {
+            deleteVariants(url);
+            try { Files.deleteIfExists(failedMarker(pathOf(url))); } catch (IOException | IllegalArgumentException ignored) { }
+        }
         if (exists(variantUrl(url, OPTIMIZED_SUFFIX)) && exists(variantUrl(url, LIGHT_SUFFIX))) return;
         if (!queued.add(url)) return;
         worker.submit(() -> {
@@ -123,6 +128,75 @@ public class VideoOptimizationService {
                 queued.remove(url);
             }
         });
+    }
+
+    /**
+     * Réunit plusieurs enregistrements de la même séance (le professeur a relancé l'enregistrement après une
+     * coupure) en une seule vidéo MP4, dans l'ordre. Fait dans la file de recompression, en arrière-plan.
+     * @param onMerged appelé avec l'adresse de la vidéo réunie ; jamais appelé en cas d'échec (les parties restent intactes)
+     */
+    public void mergeLater(List<String> urls, java.util.function.Consumer<String> onMerged) {
+        if (urls.size() < 2) return;
+        worker.submit(() -> {
+            try {
+                if (!ffmpegAvailable()) { log.warn("ffmpeg absent : parties gardées séparément {}", urls); return; }
+                List<Path> parts = new ArrayList<>();
+                for (String u : urls) {
+                    Path part = pathOf(u);
+                    if (Files.isRegularFile(part) && Files.size(part) > 0) parts.add(part);
+                }
+                if (parts.size() < 2) { log.warn("Réunion inutile, parties manquantes : {}", urls); return; }
+                String last = urls.get(urls.size() - 1);
+                String mergedUrl = last.substring(0, last.lastIndexOf('/') + 1) + "merged-" + UUID.randomUUID() + ".mp4";
+                Path target = pathOf(mergedUrl);
+                List<String> cmd = new ArrayList<>(List.of(ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-threads", "2"));
+                StringBuilder filter = new StringBuilder();
+                for (int i = 0; i < parts.size(); i++) {
+                    cmd.add("-i");
+                    cmd.add(parts.get(i).toString());
+                    // Tailles d'écran différentes d'une partie à l'autre : même cadre 720p pour pouvoir les enchaîner
+                    filter.append("[").append(i).append(":v:0]scale=1280:720:force_original_aspect_ratio=decrease,")
+                        .append("pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25[v").append(i).append("];")
+                        .append("[").append(i).append(":a:0]aresample=48000,aformat=channel_layouts=mono[a").append(i).append("];");
+                }
+                for (int i = 0; i < parts.size(); i++) filter.append("[v").append(i).append("][a").append(i).append("]");
+                filter.append("concat=n=").append(parts.size()).append(":v=1:a=1[v][a]");
+                cmd.addAll(List.of("-filter_complex", filter.toString(), "-map", "[v]", "-map", "[a]",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart"));
+                Path tmp = target.resolveSibling(target.getFileName() + ".tmp.mp4");
+                cmd.add(tmp.toString());
+                Process p = new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+                if (!p.waitFor(4, TimeUnit.HOURS)) { p.destroyForcibly(); Files.deleteIfExists(tmp); throw new IOException("ffmpeg trop long"); }
+                if (p.exitValue() != 0 || !Files.exists(tmp) || Files.size(tmp) == 0) {
+                    Files.deleteIfExists(tmp);
+                    throw new IOException("ffmpeg a échoué (code " + p.exitValue() + ")");
+                }
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                log.info("Enregistrements réunis {} → {}", urls, mergedUrl);
+                onMerged.accept(mergedUrl);
+            } catch (Exception e) {
+                log.warn("Réunion des enregistrements impossible {} : {} (parties gardées intactes)", urls, e.getMessage());
+            }
+        });
+    }
+
+    /** L'original a-t-il été modifié après la fabrication d'une de ses versions ? */
+    private boolean variantsOutdated(String url) {
+        try {
+            Path source = pathOf(url);
+            if (!Files.isRegularFile(source)) return false;
+            java.nio.file.attribute.FileTime sourceTime = Files.getLastModifiedTime(source);
+            for (String suffix : List.of(OPTIMIZED_SUFFIX, LIGHT_SUFFIX)) {
+                Path variant = pathOf(variantUrl(url, suffix));
+                // Marge d'une minute : la version est toujours écrite après la dernière modification de l'original
+                if (Files.isRegularFile(variant)
+                        && Files.getLastModifiedTime(variant).toMillis() + 60_000 < sourceTime.toMillis()) return true;
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            return false;
+        }
+        return false;
     }
 
     /** Recompression immédiate (appelée par la file d'attente). */

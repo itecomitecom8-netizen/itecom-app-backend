@@ -71,18 +71,63 @@ public class RecordingStorageService {
         return videoOptimizer.lightUrl(vc.getRecordingUrl());
     }
 
-    /** Remplace l'enregistrement de la séance par le fichier envoyé. */
+    /**
+     * Enregistrements précédents de la même séance, gardés quand un nouvel enregistrement commence
+     * (relancé après une coupure) : ils sont réunis avec le nouveau à la fin, jamais effacés.
+     */
+    private final java.util.Map<Long, List<String>> earlierParts = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Fichier ouvert par l'enregistrement en cours (morceau 0). */
+    private final java.util.Map<Long, String> currentFile = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Un nouvel enregistrement commence : l'ancien est gardé de côté pour être réuni avec lui. */
+    private void keepAsEarlierPart(VirtualClass vc, String previous) {
+        if (previous == null || !fileStorageService.exists(previous)) return;
+        earlierParts.computeIfAbsent(vc.getId(), k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(previous);
+        log.info("Séance {} : nouvel enregistrement, partie précédente gardée {}", vc.getId(), previous);
+    }
+
+    /** Réunit les parties gardées avec l'enregistrement qui vient de finir, puis lance la recompression. */
+    private void mergeOrOptimize(VirtualClass vc) {
+        String url = vc.getRecordingUrl();
+        List<String> earlier = earlierParts.remove(vc.getId());
+        currentFile.remove(vc.getId());
+        if (url == null) return;
+        if (earlier == null || earlier.isEmpty()) {
+            videoOptimizer.optimizeLater(url);
+            return;
+        }
+        List<String> all = new java.util.ArrayList<>(earlier);
+        all.add(url);
+        Long id = vc.getId();
+        videoOptimizer.mergeLater(all, merged -> transactionTemplate.executeWithoutResult(tx ->
+            virtualClassRepository.findById(id).ifPresent(fresh -> {
+                // Enregistrement supprimé ou remplacé entre-temps : on garde la vidéo réunie sans y toucher
+                if (!url.equals(fresh.getRecordingUrl())) return;
+                fresh.setRecordingUrl(merged);
+                fresh.setRecordingMimeType("video/mp4");
+                fresh.setRecordingFilename("session-" + id + ".mp4");
+                virtualClassRepository.save(fresh);
+                all.forEach(this::deleteFiles);
+                videoOptimizer.optimizeLater(merged);
+            })));
+    }
+
+    /** Remplace l'enregistrement en cours de la séance par le fichier envoyé (vidéo complète, en secours). */
     public void store(VirtualClass vc, MultipartFile file, String thumbnailBase64) throws IOException {
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("Enregistrement vide.");
         String previous = vc.getRecordingUrl();
+        // Partie déjà reçue du même enregistrement : remplacée par la vidéo complète ; un enregistrement plus ancien est gardé
+        boolean sameRecording = previous != null && previous.equals(currentFile.get(vc.getId()));
         String url = fileStorageService.store(file, DIR);
         vc.setRecordingUrl(url);
         vc.setRecordingData(null);
         vc.setRecordingMimeType(file.getContentType() != null ? file.getContentType() : "video/webm");
         vc.setRecordingFilename(file.getOriginalFilename() != null ? file.getOriginalFilename() : "enregistrement.webm");
         if (thumbnailBase64 != null && !thumbnailBase64.isBlank()) vc.setThumbnailData(thumbnailBase64);
-        deleteFiles(previous);
-        videoOptimizer.optimizeLater(url);
+        if (sameRecording) deleteFiles(previous); else keepAsEarlierPart(vc, previous);
+        nextChunk.remove(vc.getId());
+        recorders.remove(vc.getId());
+        mergeOrOptimize(vc);
     }
 
     /** Prochain morceau attendu par séance (les morceaux arrivent dans l'ordre, un renvoi est ignoré). */
@@ -90,7 +135,7 @@ public class RecordingStorageService {
 
     /**
      * Morceau d'enregistrement envoyé pendant le cours : le morceau 0 ouvre un nouveau fichier (qui remplace
-     * l'ancien enregistrement), les suivants s'y ajoutent. Le fichier est lisible à tout moment, même si le
+     * l'ancien enregistrement, gardé pour être réuni avec le nouveau), les suivants s'y ajoutent. Le fichier est lisible à tout moment, même si le
      * professeur ferme l'onglet sans arrêter l'enregistrement.
      * @return false si le morceau arrive dans le désordre (un morceau précédent manque)
      */
@@ -138,12 +183,19 @@ public class RecordingStorageService {
         if (data == null || data.length == 0) return true;
         if (seq == 0) {
             String previous = vc.getRecordingUrl();
+            // Morceau 0 renvoyé après une coupure (réponse perdue) : déjà reçu, on ne recommence pas le fichier
+            if (previous != null && previous.equals(currentFile.get(vc.getId())) && Integer.valueOf(1).equals(nextChunk.get(vc.getId()))
+                    && fileStorageService.size(previous) == data.length) {
+                return true;
+            }
             String url = fileStorageService.storeBytes(data, DIR, ".webm");
             vc.setRecordingUrl(url);
             vc.setRecordingData(null);
             vc.setRecordingMimeType(mimeType != null && !mimeType.isBlank() ? mimeType : "video/webm");
             vc.setRecordingFilename("session-" + vc.getId() + ".webm");
-            deleteFiles(previous);
+            // Jamais d'effacement : l'enregistrement précédent de la séance est gardé et réuni avec celui-ci
+            keepAsEarlierPart(vc, previous);
+            currentFile.put(vc.getId(), url);
             nextChunk.put(vc.getId(), 1);
             return true;
         }
@@ -165,7 +217,7 @@ public class RecordingStorageService {
         if (url == null) return;
         // Des versions faites sur un fichier encore incomplet (redémarrage pendant le cours) seraient tronquées
         videoOptimizer.deleteVariants(url);
-        videoOptimizer.optimizeLater(url);
+        mergeOrOptimize(vc);
     }
 
     /** Lance la recompression de l'enregistrement s'il n'est pas déjà fait. */
@@ -176,6 +228,10 @@ public class RecordingStorageService {
     public void delete(VirtualClass vc) {
         nextChunk.remove(vc.getId());
         recorders.remove(vc.getId());
+        currentFile.remove(vc.getId());
+        // Suppression demandée : les parties précédentes gardées partent aussi
+        List<String> earlier = earlierParts.remove(vc.getId());
+        if (earlier != null) earlier.forEach(this::deleteFiles);
         deleteFiles(vc.getRecordingUrl());
         vc.setRecordingUrl(null);
         vc.setRecordingData(null);
